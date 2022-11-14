@@ -103,6 +103,10 @@ func (r *runtime) ListContainers(ctx context.Context) ([]*model.Container, error
 	return containers, nil
 }
 
+func (r *runtime) RemoveNamespace(ctx context.Context) error {
+	return nil
+}
+
 func (r *runtime) Close() error {
 	return nil
 }

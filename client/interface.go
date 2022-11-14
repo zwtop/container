@@ -29,6 +29,9 @@ import (
 type Runtime interface {
 	ImageManager
 	ContainerManager
+
+	// RemoveNamespace delete runtime namespace
+	RemoveNamespace(ctx context.Context) error
 	io.Closer
 }
 

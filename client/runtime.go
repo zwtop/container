@@ -275,6 +275,11 @@ func (r *runtime) ListContainers(ctx context.Context) ([]*model.Container, error
 	return containerList, nil
 }
 
+func (r *runtime) RemoveNamespace(ctx context.Context) error {
+	err := r.client.NamespaceService().Delete(ctx, r.namespace)
+	return ignoreNotFoundError(err)
+}
+
 func (r *runtime) Close() error {
 	return r.client.Close()
 }
