@@ -140,7 +140,7 @@ func (r *runtime) ListImages(ctx context.Context) ([]images.Image, error) {
 
 func (r *runtime) RemoveImage(ctx context.Context, ref string) error {
 	ctx = namespaces.WithNamespace(ctx, r.namespace)
-	err := r.client.ImageService().Delete(ctx, ref)
+	err := r.client.ImageService().Delete(ctx, ref, images.SynchronousDelete())
 	return ignoreNotFoundError(err)
 }
 
