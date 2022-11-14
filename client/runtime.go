@@ -246,7 +246,7 @@ func (r *runtime) RemoveContainer(ctx context.Context, containerID string) error
 		}
 	}
 
-	return container.Delete(ctx)
+	return container.Delete(ctx, containerd.WithSnapshotCleanup)
 }
 
 func (r *runtime) GetContainer(ctx context.Context, containerID string) (*model.Container, error) {
