@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/images"
 
 	"github.com/everoute/container/client"
@@ -105,6 +106,22 @@ func (r *runtime) ListContainers(ctx context.Context) ([]*model.Container, error
 
 func (r *runtime) RemoveNamespace(ctx context.Context) error {
 	return nil
+}
+
+func (r *runtime) GetContainerStatus(ctx context.Context, containerID string) (containerd.Status, error) {
+	_, ok := r.containers[containerID]
+	if !ok {
+		return containerd.Status{}, fmt.Errorf("container %s not found", containerID)
+	}
+	return containerd.Status{Status: containerd.Running}, nil
+}
+
+func (r *runtime) ExecCommand(ctx context.Context, containerID string, commands []string) (*containerd.ExitStatus, error) {
+	_, ok := r.containers[containerID]
+	if !ok {
+		return nil, fmt.Errorf("container %s not found", containerID)
+	}
+	return containerd.NewExitStatus(0, time.Now(), nil), nil
 }
 
 func (r *runtime) Close() error {

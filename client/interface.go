@@ -20,6 +20,7 @@ import (
 	"context"
 	"io"
 
+	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/images"
 
 	"github.com/everoute/container/model"
@@ -64,4 +65,10 @@ type ContainerManager interface {
 
 	// ListContainers list containers in the namespace
 	ListContainers(ctx context.Context) ([]*model.Container, error)
+
+	// GetContainerStatus return the container status
+	GetContainerStatus(ctx context.Context, containerID string) (containerd.Status, error)
+
+	// ExecCommand exec giving commands and return result
+	ExecCommand(ctx context.Context, containerID string, commands []string) (*containerd.ExitStatus, error)
 }

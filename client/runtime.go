@@ -188,8 +188,8 @@ func (r *runtime) CreateContainer(ctx context.Context, container *model.Containe
 		return err
 	}
 	defer func() {
-		if err != nil {
-			_, _ = task.Delete(ctx)
+		if err != nil || follow {
+			_, _ = task.Delete(ctx, containerd.WithProcessKill)
 		}
 	}()
 
@@ -208,11 +208,15 @@ func (r *runtime) CreateContainer(ctx context.Context, container *model.Containe
 	if follow {
 		status, err := task.Wait(ctx)
 		if err != nil {
-			return err
+			return fmt.Errorf("wait task: %s", err)
 		}
-		if rs := <-status; rs.ExitCode() != 0 {
-			err = fmt.Errorf("exit with err code %d: %s", rs.ExitCode(), rs.Error())
-			return err
+		select {
+		case rs := <-status:
+			if rs.ExitCode() != 0 {
+				return fmt.Errorf("exit with err code %d: %s", rs.ExitCode(), rs.Error())
+			}
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 
@@ -278,6 +282,69 @@ func (r *runtime) ListContainers(ctx context.Context) ([]*model.Container, error
 func (r *runtime) RemoveNamespace(ctx context.Context) error {
 	err := r.client.NamespaceService().Delete(ctx, r.namespace)
 	return ignoreNotFoundError(err)
+}
+
+func (r *runtime) GetContainerStatus(ctx context.Context, containerID string) (containerd.Status, error) {
+	ctx = namespaces.WithNamespace(ctx, r.namespace)
+
+	c, err := r.client.LoadContainer(ctx, containerID)
+	if err != nil {
+		return containerd.Status{}, fmt.Errorf("load container: %s", err)
+	}
+
+	task, err := c.Task(ctx, nil)
+	if err != nil {
+		return containerd.Status{}, fmt.Errorf("load task: %s", err)
+	}
+
+	return task.Status(ctx)
+}
+
+func (r *runtime) ExecCommand(ctx context.Context, containerID string, commands []string) (*containerd.ExitStatus, error) {
+	ctx = namespaces.WithNamespace(ctx, r.namespace)
+
+	c, err := r.client.LoadContainer(ctx, containerID)
+	if err != nil {
+		return nil, fmt.Errorf("load container: %s", err)
+	}
+
+	task, err := c.Task(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("load task: %s", err)
+	}
+
+	spec, err := c.Spec(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load task spec: %s", err)
+	}
+
+	taskExecID := "exec-" + rand.String(10)
+	progressSpec := spec.Process
+	progressSpec.Terminal = false
+	progressSpec.Args = commands
+
+	progress, err := task.Exec(ctx, taskExecID, progressSpec, cio.NullIO)
+	if err != nil {
+		return nil, fmt.Errorf("exec command: %s", err)
+	}
+	defer progress.Delete(ctx, containerd.WithProcessKill)
+
+	err = progress.Start(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("start progress: %s", err)
+	}
+
+	statusChan, err := progress.Wait(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("wait task: %s", err)
+	}
+
+	select {
+	case exitStatus := <-statusChan:
+		return &exitStatus, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func (r *runtime) Close() error {
