@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"sync"
 	"time"
 
 	"github.com/containerd/containerd"
@@ -33,16 +34,23 @@ import (
 
 type runtime struct {
 	followWaitTime time.Duration
-	images         map[string]images.Image
-	containers     map[string]*model.Container
+	images         syncMap[string, images.Image]
+	containers     syncMap[string, *model.Container]
 }
+
+type syncMap[K, V any] struct {
+	sync.Map
+}
+
+func (m *syncMap[K, V]) Load(k K) (V, bool)      { return m.Map.Load(k) }
+func (m *syncMap[K, V]) Store(k K, v V)          { m.Map.Store(k, v) }
+func (m *syncMap[K, V]) Delete(k K)              { m.Map.Delete(k) }
+func (m *syncMap[K, V]) Range(f func(K, V) bool) { m.Map.Range(func(k, v any) bool { return f(k, v) }) }
 
 // NewRuntime create a mock runtime, any images or containers record to memory only
 func NewRuntime(followWaitTime time.Duration) client.Runtime {
 	return &runtime{
 		followWaitTime: followWaitTime,
-		images:         make(map[string]images.Image),
-		containers:     make(map[string]*model.Container),
 	}
 }
 
@@ -65,7 +73,7 @@ func (r *runtime) NodeExecute(ctx context.Context, name string, commands ...stri
 
 func (r *runtime) ImportImages(ctx context.Context, refs ...string) error {
 	for _, ref := range refs {
-		r.images[ref] = images.Image{Name: ref}
+		r.images.Store(ref, images.Image{Name: ref})
 	}
 	return nil
 }
@@ -73,29 +81,30 @@ func (r *runtime) ImportImages(ctx context.Context, refs ...string) error {
 func (r *runtime) ListImages(ctx context.Context) ([]images.Image, error) {
 	var allImages []images.Image
 
-	for _, i := range r.images {
+	r.images.Range(func(_ string, i images.Image) bool {
 		allImages = append(allImages, i)
-	}
+		return true
+	})
 
 	return allImages, nil
 }
 
 func (r *runtime) RemoveImage(ctx context.Context, ref string) error {
-	delete(r.images, ref)
+	r.images.Delete(ref)
 	return nil
 }
 
 func (r *runtime) GetImage(ctx context.Context, ref string) (*images.Image, bool, error) {
-	i, ok := r.images[ref]
+	i, ok := r.images.Load(ref)
 	return &i, ok, nil
 }
 
 func (r *runtime) CreateContainer(ctx context.Context, container *model.Container, follow bool) error {
-	if _, ok := r.containers[container.Name]; ok {
+	if _, ok := r.containers.Load(container.Name); ok {
 		return fmt.Errorf("container with name %s exist", container.Name)
 	}
 
-	r.containers[container.Name] = container
+	r.containers.Store(container.Name, container)
 	if follow {
 		time.Sleep(r.followWaitTime)
 	}
@@ -103,20 +112,20 @@ func (r *runtime) CreateContainer(ctx context.Context, container *model.Containe
 }
 
 func (r *runtime) UpdateContainer(_ context.Context, container *model.Container, _ *client.ContainerUpdateOptions) error {
-	if _, ok := r.containers[container.Name]; !ok {
+	if _, ok := r.containers.Load(container.Name); !ok {
 		return fmt.Errorf("container with name %s not exist", container.Name)
 	}
-	r.containers[container.Name] = container
+	r.containers.Store(container.Name, container)
 	return nil
 }
 
 func (r *runtime) RemoveContainer(ctx context.Context, containerID string) error {
-	delete(r.containers, containerID)
+	r.containers.Delete(containerID)
 	return nil
 }
 
 func (r *runtime) GetContainer(ctx context.Context, containerID string) (*model.Container, error) {
-	container, ok := r.containers[containerID]
+	container, ok := r.containers.Load(containerID)
 	if !ok {
 		return nil, fmt.Errorf("container %s not found", containerID)
 	}
@@ -124,15 +133,16 @@ func (r *runtime) GetContainer(ctx context.Context, containerID string) (*model.
 }
 
 func (r *runtime) ListContainers(ctx context.Context) ([]*model.Container, error) {
-	containers := make([]*model.Container, 0, len(r.containers))
-	for _, container := range r.containers {
+	containers := make([]*model.Container, 0)
+	r.containers.Range(func(_ string, container *model.Container) bool {
 		containers = append(containers, container)
-	}
+		return true
+	})
 	return containers, nil
 }
 
 func (r *runtime) GetContainerStatus(ctx context.Context, containerID string) (client.ContainerStatus, error) {
-	_, ok := r.containers[containerID]
+	_, ok := r.containers.Load(containerID)
 	if !ok {
 		return client.ContainerStatus{}, fmt.Errorf("container %s not found", containerID)
 	}
@@ -140,7 +150,7 @@ func (r *runtime) GetContainerStatus(ctx context.Context, containerID string) (c
 }
 
 func (r *runtime) ExecCommand(ctx context.Context, containerID string, commands []string) (*containerd.ExitStatus, error) {
-	_, ok := r.containers[containerID]
+	_, ok := r.containers.Load(containerID)
 	if !ok {
 		return nil, fmt.Errorf("container %s not found", containerID)
 	}
